@@ -41,7 +41,7 @@ jobs:
 
       - name: Run releaser app
         env:
-          GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_API_TOKEN: ${{ secrets.GH_APP_SECRET }}
         run: |
           go run .
 

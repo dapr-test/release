@@ -142,7 +142,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to get event: %v", err)
 	}
-	log.Printf("triggering event: %v", triggeringEvent)
 
 	if triggeringEvent.GetSender() == nil {
 		log.Fatalln("no sender(actor) found in event")
