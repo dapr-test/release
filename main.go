@@ -151,6 +151,7 @@ func main() {
 	ctx := context.Background()
 	// TODO: revert to the constants
 	triggeringActorMembership, resp, err := client.Teams.GetTeamMembershipByID(ctx, 182497202, 11049175, triggeringEvent.GetSender().GetLogin())
+	log.Printf("getting membership for: %v", triggeringEvent.GetSender().GetLogin())
 	if err != nil {
 		log.Fatalf("failed to retrieve membership: %v", err)
 	}

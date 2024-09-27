@@ -43,8 +43,6 @@ func getGithubIssuesEventFromEnv(pathName *string) (event *github.IssuesEvent, e
 
 	jsonBytes, err := io.ReadAll(file)
 
-	log.Printf("json contents: %v", string(jsonBytes[:]))
-
 	if err := json.Unmarshal(jsonBytes, &event); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal: %v", err)
 	}
