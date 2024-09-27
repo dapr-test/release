@@ -1,0 +1,69 @@
+name: Releaser
+on:
+  issues:
+    types:
+      - opened
+      - reopened # TODO: Remove once testing is complete
+      - closed # TODO: Remove once testing is complete
+
+
+jobs:
+  unit-test-releaser:
+    name: test release process
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        id: setup-go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+
+      - name: Test
+        run: |
+          go test -v -race ./...
+
+  release:
+    name: release process
+    runs-on: ubuntu-latest
+    needs: unit-test-releaser
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        id: setup-go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+
+      - name: Run releaser app
+        env:
+          GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          go run .
+
+  unexpected-test-failure:
+    name: Output on test failure
+    runs-on: ubuntu-latest
+    needs: unit-test-releaser
+    if: ${{ always() && contains(needs.*.result, 'failure') }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Add comment to the issue
+        env:
+          GH_REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+          BODY: >
+            # ERROR
+            An error has been encountered while testing the release app.
+            No release has taken place.
+        run: gh issue comment "$NUMBER" --body "$BODY"
+
+      - name: Close the issue
+        env:
+          NUMBER: ${{ github.event.issue.number }}
+        run: gh issue close "$NUMBER"

@@ -1,0 +1,15 @@
+*.sh
+!/script/*.sh
+*.test
+.*.local
+coverage.out
+/bin
+# intellij files
+.idea/
+vendor/
+.DS_Store
+.vscode
+# vim temp files
+*.swp
+# env files
+.env
