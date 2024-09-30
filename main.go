@@ -30,7 +30,7 @@ func ParseMarkdown(markdown string) ([]DaprCore, []DaprSDK, error) {
 	var daprCore []DaprCore
 	var sdks []DaprSDK
 
-	lines := strings.Split(markdown, "\n")
+	lines := strings.Split(markdown, "\r\n")
 
 	// Regex to parse DaprCore lines
 	coreRegex := regexp.MustCompile(`^\* ([^:]+):\s*(.*)$`)
