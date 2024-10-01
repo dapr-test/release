@@ -2,18 +2,28 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/google/go-github/v65/github"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const (
-	DAPR_GITHUB_ORG_ID          = 51932459
-	DAPR_GITHUB_RELEASE_TEAM_ID = 4237823
+	// GITHUB_EVENT_NAME_ENV is the environment variable that contains the name of the event
+	GITHUB_EVENT_NAME_ENV = "GITHUB_EVENT_NAME"
+	// GITHUB_EVENT_PATH_ENV is the environment variable that contains the path to the GitHub event JSON file
+	GITHUB_EVENT_PATH_ENV = "GITHUB_EVENT_PATH"
+	// Commit status context value used for tests
+	GITHUB_RELEASE_CONTEXT_COMMIT_STATUS = "release/tests"
+	DAPR_GITHUB_ORG_ID                   = 51932459
+	DAPR_GITHUB_RELEASE_TEAM_ID          = 4237823
 )
 
 type DaprCore struct {
@@ -26,20 +36,53 @@ type DaprSDK struct {
 	Value string
 }
 
+func isIssueEvent() bool {
+	eventName := os.Getenv(GITHUB_EVENT_NAME_ENV)
+	log.Printf("event type: %s", eventName)
+	return eventName == "issues"
+}
+
+func getGithubIssuesEventFromEnv(pathName *string) (event *github.IssuesEvent, err error) {
+	path := "./testData/event.json"
+	if pathName != nil {
+		path = *pathName
+	}
+
+	if len(path) == 0 {
+		return nil, errors.New(GITHUB_EVENT_PATH_ENV + " is empty")
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file: %v, err: %v", path, err)
+	}
+	defer file.Close()
+
+	jsonBytes, err := io.ReadAll(file)
+
+	if err := json.Unmarshal(jsonBytes, &event); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal: %v", err)
+	}
+	return
+}
+
 func ParseMarkdown(markdown string) ([]DaprCore, []DaprSDK, error) {
 	var daprCore []DaprCore
 	var sdks []DaprSDK
 
 	lines := strings.Split(markdown, "\r\n")
+	// TODO: Implement goldmark or more robust parsing for markdown
+	// This implementation currently treats everything after the SDK line as part of the SDKs section.
 
 	// Regex to parse DaprCore lines
-	coreRegex := regexp.MustCompile(`^\* ([^:]+):\s*(.*)$`)
+	coreRegex := regexp.MustCompile(`^\s*\* ([^:]+):\s*(.*)$`)
 	// Regex to parse Dapr SDK lines
-	sdkRegex := regexp.MustCompile(`^\s*\* ([^:]+):\s*(.*)$`)
+	sdkRegex := coreRegex
 
 	inSDKs := false
 	for _, line := range lines {
-		if strings.HasPrefix(line, "* SDKs:") {
+		trimmedLine := strings.TrimSpace(line)
+		if trimmedLine == "* SDKs:" {
 			inSDKs = true
 			continue
 		}
@@ -55,10 +98,6 @@ func ParseMarkdown(markdown string) ([]DaprCore, []DaprSDK, error) {
 				daprCore = append(daprCore, DaprCore{Name: matches[1], Value: strings.TrimSpace(matches[2])})
 			}
 		}
-	}
-
-	if !inSDKs {
-		return nil, nil, fmt.Errorf("no SDKs section found")
 	}
 
 	return daprCore, sdks, nil
@@ -104,7 +143,7 @@ func CheckAllFields(core []DaprCore, sdks []DaprSDK) error {
 
 	for s, present := range requiredDaprSDKs {
 		if !present {
-			return fmt.Errorf("missing SDK: %s", s)
+			return fmt.Errorf("missing SDK definition: %s", s)
 		}
 	}
 
@@ -150,7 +189,6 @@ func main() {
 	ctx := context.Background()
 	// TODO: revert to the constants
 	triggeringActorMembership, resp, err := client.Teams.GetTeamMembershipByID(ctx, 182497202, 11049175, triggeringEvent.GetSender().GetLogin())
-	log.Printf("getting membership for: %v", triggeringEvent.GetSender().GetLogin())
 	if err != nil {
 		log.Fatalf("failed to retrieve membership: %v", err)
 	}
@@ -192,9 +230,10 @@ func main() {
 	}
 
 	// get commit status
-	status, resp, err := client.Repositories.GetCombinedStatus(ctx, "dapr-test", "dapr", "main", nil)
+	status, resp, err := client.Repositories.GetCombinedStatus(ctx, "dapr-test", "dapr", "b26a1951c482b6754d7486c0a1ec0b9999eb99a0", nil)
+	defer resp.Body.Close()
 	if err != nil {
-		log.Fatalf("dapr-test/dapr not found: %v", err)
+		log.Fatalf("error getting commit status for dapr-test/dapr: %v", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -202,4 +241,27 @@ func main() {
 	}
 
 	log.Printf("status: %v, totalCount: %v, sha: %v", status.GetState(), status.GetTotalCount(), status.GetSHA())
+	log.Println(status)
+
+	// if combined status is not success:
+	//trigger runs with a workflow dispatch for missing statuses (in this case only one status)
+
+	resp, err = client.Actions.CreateWorkflowDispatchEventByFileName(ctx, "dapr-test", "dapr", "release-test.yml", github.CreateWorkflowDispatchEventRequest{
+		// Unable to use ref as it refers to a tag or branch only
+		Ref: "master",
+		Inputs: map[string]interface{}{
+			"targetSha": "b26a1951c482b6754d7486c0a1ec0b9999eb99a0",
+			"testSha":   "exampledaprsha",
+		},
+	})
+	if err != nil {
+		log.Fatalf("failed to trigger workflow: %v", err)
+	}
+
+	log.Println(resp)
+
+	time.Sleep(30 * time.Second)
+
+	newStatus, resp, err := client.Repositories.GetCombinedStatus(ctx, "dapr-test", "dapr", "b26a1951c482b6754d7486c0a1ec0b9999eb99a0", nil)
+	log.Println(newStatus)
 }
